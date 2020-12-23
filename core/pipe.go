@@ -116,7 +116,7 @@ func (p *pipe) Write(b []byte) (n int, err error) {
 	}
 
 	buf := NewBytes(len(b))
-	copy(buf, b)
+	copy(buf[:len(b)], b)
 
 	//for once := true; once || len(b) > 0; once = false {
 	//	select {
@@ -129,7 +129,7 @@ func (p *pipe) Write(b []byte) (n int, err error) {
 	//	}
 	//}
 	select {
-	case p.wrCh <- buf:
+	case p.wrCh <- buf[:len(b)]:
 	case <-p.done:
 		return 0, p.writeCloseError()
 	}
