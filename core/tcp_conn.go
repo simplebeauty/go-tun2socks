@@ -14,9 +14,6 @@ import (
 	"sync"
 	"time"
 	"unsafe"
-
-	"gopkg.in/djherbis/buffer.v1"
-	"gopkg.in/djherbis/nio.v2"
 )
 
 type tcpConnState uint
@@ -69,9 +66,8 @@ type tcpConn struct {
 	connKey       uint32
 	canWrite      *sync.Cond // Condition variable to implement TCP backpressure.
 	state         tcpConnState
-	pipBuf        buffer.Buffer
-	sndPipeReader *nio.PipeReader
-	sndPipeWriter *nio.PipeWriter
+	sndPipeReader *PipeReader
+	sndPipeWriter *PipeWriter
 	closeOnce     sync.Once
 	closeErr      error
 }
@@ -90,8 +86,7 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 	setTCPErrCallback(pcb)
 	setTCPPollCallback(pcb, C.u8_t(TCP_POLL_INTERVAL))
 
-	buf := buffer.New(4 * 1024) // 32KB In memory Buffer
-	pipeReader, pipeWriter := nio.Pipe(buf)
+	pipeReader, pipeWriter := Pipe()
 	conn := &tcpConn{
 		pcb:           pcb,
 		handler:       handler,
@@ -101,7 +96,6 @@ func newTCPConn(pcb *C.struct_tcp_pcb, handler TCPConnHandler) (TCPConn, error) 
 		connKey:       connKey,
 		canWrite:      sync.NewCond(&sync.Mutex{}),
 		state:         tcpNewConn,
-		pipBuf:        buf,
 		sndPipeReader: pipeReader,
 		sndPipeWriter: pipeWriter,
 	}
@@ -190,16 +184,15 @@ func (conn *tcpConn) Receive(data []byte) error {
 	if err := conn.receiveCheck(); err != nil {
 		return err
 	}
-	if conn.pipBuf.Cap()-conn.pipBuf.Len() > int64(len(data)) {
-		n, err := conn.sndPipeWriter.Write(data)
-		if err != nil {
-			return NewLWIPError(LWIP_ERR_CLSD)
-		}
-		C.tcp_recved(conn.pcb, C.u16_t(n))
-		return NewLWIPError(LWIP_ERR_OK)
-	} else {
+	n, err := conn.sndPipeWriter.Write(data)
+	if err != nil {
+		return NewLWIPError(LWIP_ERR_CLSD)
+	}
+	if n == 0 {
 		return NewLWIPError(LWIP_ERR_CONN)
 	}
+	C.tcp_recved(conn.pcb, C.u16_t(n))
+	return NewLWIPError(LWIP_ERR_OK)
 }
 
 func (conn *tcpConn) Read(data []byte) (int, error) {
