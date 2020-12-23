@@ -47,8 +47,9 @@ type pipe struct {
 	rerr onceError
 	werr onceError
 
-	buf []byte
-	bw  []byte
+	bufs [][]byte
+	buf  []byte
+	bw   []byte
 }
 
 func (p *pipe) Read(b []byte) (n int, err error) {
@@ -63,7 +64,10 @@ func (p *pipe) Read(b []byte) (n int, err error) {
 		if nr < len(p.bw) {
 			p.bw = p.bw[nr:]
 		} else {
-			FreeBytes(p.buf)
+			p.wrMu.Lock()
+			FreeBytes(p.bufs[0])
+			p.bufs = p.bufs[1:]
+			p.wrMu.Unlock()
 			p.buf = nil
 			p.bw = nil
 		}
@@ -77,6 +81,11 @@ func (p *pipe) Read(b []byte) (n int, err error) {
 		if nr < len(bw) {
 			p.bw = bw[nr:]
 			p.buf = bw
+		} else {
+			p.wrMu.Lock()
+			FreeBytes(p.bufs[0])
+			p.bufs = p.bufs[1:]
+			p.wrMu.Unlock()
 		}
 		//p.rdCh <- nr
 		return nr, nil
@@ -116,6 +125,7 @@ func (p *pipe) Write(b []byte) (n int, err error) {
 	}
 
 	buf := NewBytes(len(b))
+	p.bufs = append(p.bufs, buf)
 	copy(buf[:len(b)], b)
 
 	//for once := true; once || len(b) > 0; once = false {
