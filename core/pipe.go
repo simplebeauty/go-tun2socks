@@ -63,9 +63,9 @@ func (p *pipe) Read(b []byte) (n int, err error) {
 		if nr < len(p.bw) {
 			p.bw = p.bw[nr:]
 		} else {
+			FreeBytes(p.buf)
 			p.buf = nil
 			p.bw = nil
-			FreeBytes(p.buf)
 		}
 		//p.rdCh <- nr
 		return nr, nil
@@ -131,9 +131,9 @@ func (p *pipe) Write(b []byte) (n int, err error) {
 	select {
 	case p.wrCh <- buf:
 	case <-p.done:
-		return n, p.writeCloseError()
+		return 0, p.writeCloseError()
 	}
-	return n, nil
+	return len(b), nil
 }
 
 func (p *pipe) writeCloseError() error {
@@ -229,7 +229,7 @@ func (w *PipeWriter) CloseWithError(err error) error {
 // the individual calls will be gated sequentially.
 func Pipe() (*PipeReader, *PipeWriter) {
 	p := &pipe{
-		wrCh: make(chan []byte, 4),
+		wrCh: make(chan []byte, 2),
 		rdCh: make(chan int),
 		done: make(chan struct{}),
 	}
